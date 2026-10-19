@@ -1,0 +1,827 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Catan Table</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Alegreya:wght@500;700;800&family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+<style>
+/* Layout: the island on open water fills the left; a tide-chart style rail on the right
+   holds what you can do now, your hand, the table and the log. */
+:root {
+  --ocean: #0b2230;
+  --ocean-2: #102d3d;
+  --ocean-3: #17394b;
+  --line: #24506a;
+  --foam: #e8f0f1;
+  --mist: #93b2be;
+  --glow: #ffd95e;
+  --danger: #ff8a7a;
+  --ok: #86dba8;
+  --parchment: #f3ead6;
+  --ink: #1d1a14;
+  --brick: #c8622f; --lumber: #2f6d3f; --wool: #9cc65b; --grain: #e3b73d; --ore: #8b95a2; --desert: #e0cd9a;
+  --p-red: #d33a3a; --p-blue: #2f6fd6; --p-orange: #f08c1c; --p-white: #f1ede4;
+  --display: "Alegreya", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --body: "Atkinson Hyperlegible", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--ocean); color: var(--foam); font: 15px/1.45 var(--body); }
+.brand, .card .n, .player .vp, .banner .what, .tok-num, .port-txt { font-variant-numeric: lining-nums tabular-nums; }
+button, select, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--glow); outline-offset: 2px; }
+
+.top { display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+  padding: 10px max(16px, env(safe-area-inset-right, 0px)) 10px max(16px, env(safe-area-inset-left, 0px));
+  border-bottom: 1px solid var(--line); background: var(--ocean-2); }
+.brand { font: 800 26px/1 var(--display); letter-spacing: .04em; }
+.brand small { font: 500 13px var(--body); color: var(--mist); letter-spacing: 0; margin-left: 6px; }
+.turninfo { color: var(--mist); }
+.turninfo b { color: var(--foam); }
+.dice { display: flex; gap: 6px; align-items: center; }
+.dice svg { width: 30px; height: 30px; }
+.dice.stale { opacity: .45; }
+.spacer { flex: 1; }
+.bank { color: var(--mist); font-size: 13px; font-variant-numeric: tabular-nums; display: flex; gap: 10px; flex-wrap: wrap; }
+.bank span i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: 0; }
+
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 0; align-items: start; }
+.board-wrap { position: sticky; top: 0; height: calc(100vh - 52px); min-width: 0; padding: 12px; }
+#board { width: 100%; height: 100%; display: block; user-select: none; }
+.board-tools { position: absolute; top: 14px; left: 16px; display: flex; gap: 8px; }
+.chipbtn { background: var(--ocean-3); border: 1px solid var(--line); border-radius: 999px; padding: 3px 11px; font-size: 13px; color: var(--mist); }
+.chipbtn[aria-pressed="true"] { color: var(--foam); border-color: var(--mist); }
+
+.side { border-left: 1px solid var(--line); background: var(--ocean-2); display: flex; flex-direction: column; min-width: 0;
+  padding-block: 0; }
+.panel { padding: 14px 16px; border-bottom: 1px solid var(--line); }
+.panel h3 { margin: 0 0 8px; font: 700 12px var(--body); text-transform: uppercase; letter-spacing: .12em; color: var(--mist); }
+
+.banner { padding: 14px 16px; border-bottom: 1px solid var(--line); background: var(--ocean-3); }
+.banner .what { font: 700 21px/1.2 var(--display); text-wrap: balance; }
+.banner .sub { color: var(--mist); font-size: 14px; margin-top: 3px; }
+.banner.yours { box-shadow: inset 4px 0 0 var(--glow); }
+.banner.waiting .what::after { content: ""; display: inline-block; width: 1.2em; text-align: left; animation: dots 1.4s steps(4) infinite; }
+@keyframes dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
+
+.btn { border: 1px solid var(--line); background: var(--ocean-3); border-radius: 8px; padding: 7px 13px; }
+.btn:hover:not(:disabled) { border-color: var(--mist); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn.primary { background: var(--glow); color: var(--ink); border-color: var(--glow); font-weight: 700; }
+.btn.big { font-size: 17px; padding: 10px 18px; }
+.btn.ghost { background: transparent; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.stack { display: flex; flex-direction: column; gap: 10px; }
+.muted { color: var(--mist); }
+.small { font-size: 13px; }
+.msg { margin-top: 8px; font-size: 14px; white-space: pre-wrap; }
+.msg.err { color: var(--danger); }
+.msg.okmsg { color: var(--ok); }
+
+.cost { display: inline-flex; gap: 2px; vertical-align: -1px; }
+.cost i, .res-dot { display: inline-block; width: 10px; height: 13px; border-radius: 2px; border: 1px solid rgba(0,0,0,.35); }
+.buildlist { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; font-size: 14px; align-items: center; }
+.buildlist .no { color: var(--mist); }
+.buildlist .yes { color: var(--foam); font-weight: 700; }
+
+.cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+.card { border-radius: 7px; background: var(--parchment); color: var(--ink); text-align: center; padding: 0 0 5px; overflow: hidden;
+  border: 1px solid rgba(0,0,0,.4); }
+.card .swatch { height: 18px; }
+.card .n { font: 800 22px/1.1 var(--display); font-variant-numeric: tabular-nums; }
+.card .lbl { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+.card.zero { opacity: .45; }
+.devs { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.dev { display: flex; align-items: center; gap: 10px; background: var(--ocean-3); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px 6px 10px; }
+.dev .name { flex: 1; font-weight: 700; }
+.dev .note { color: var(--mist); font-size: 12px; font-weight: 400; margin-left: 6px; }
+.prodline { margin-top: 8px; font-size: 13px; color: var(--mist); font-variant-numeric: tabular-nums; }
+
+.players { display: flex; flex-direction: column; gap: 8px; }
+.player { display: grid; grid-template-columns: 14px 1fr auto; gap: 2px 10px; align-items: center; padding: 8px 10px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--ocean-2); }
+.player.cur { border-color: var(--pc); box-shadow: inset 3px 0 0 var(--pc); }
+.player .chip { width: 14px; height: 14px; border-radius: 3px; background: var(--pc); border: 1px solid rgba(0,0,0,.5); grid-row: span 2; }
+.player .pname { font-weight: 700; overflow-wrap: anywhere; }
+.kind { font: 700 10px var(--body); text-transform: uppercase; letter-spacing: .1em; color: var(--mist); border: 1px solid var(--line);
+  border-radius: 4px; padding: 1px 5px; margin-left: 6px; vertical-align: 2px; }
+.kind.you { color: var(--ink); background: var(--glow); border-color: var(--glow); }
+.player .vp { font: 800 24px/1 var(--display); grid-row: span 2; text-align: right; font-variant-numeric: tabular-nums; }
+.player .vp small { font: 400 11px var(--body); color: var(--mist); display: block; text-align: right; }
+.player .stats { color: var(--mist); font-size: 13px; font-variant-numeric: tabular-nums; }
+.badge { display: inline-block; font-size: 11px; font-weight: 700; color: var(--ink); background: var(--glow); border-radius: 4px; padding: 0 5px; margin-left: 4px; }
+.thinking { color: var(--glow); font-size: 12px; margin-left: 6px; }
+
+.picker { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
+.step { min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 3px; background: var(--ocean-3); border: 1px solid var(--line); border-radius: 8px; padding: 5px 0; }
+.step .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: .03em; color: var(--mist); }
+.step .ctl { display: flex; align-items: center; gap: 2px; }
+.step button { width: 21px; height: 22px; border-radius: 5px; border: 1px solid var(--line); background: var(--ocean-2); padding: 0; line-height: 1; }
+.step .v { min-width: 14px; text-align: center; font-weight: 700; font-variant-numeric: tabular-nums; }
+.step .res-dot { width: 22px; height: 6px; border-radius: 3px; }
+.sel { background: var(--ocean-3); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+.subhead { font-size: 13px; color: var(--mist); margin: 2px 0 6px; }
+.offer { background: var(--ocean-3); border: 1px solid var(--glow); border-radius: 10px; padding: 10px 12px; }
+details.fold { margin-top: 14px; }
+details.fold > summary { cursor: pointer; font-size: 13px; color: var(--mist); list-style-position: inside; }
+details.fold[open] > summary { margin-bottom: 6px; }
+
+.log { flex: 1; min-height: 160px; overflow-y: auto; padding: 10px 16px 16px; font-size: 13.5px; }
+.log div { padding: 1px 0; }
+.log .turn { margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--line); color: var(--mist); font-weight: 700; font-size: 12px;
+  text-transform: uppercase; letter-spacing: .1em; }
+.log .win { color: var(--glow); font-weight: 700; }
+.log .pn { font-weight: 700; }
+details.console { border-top: 1px solid var(--line); padding: 10px 16px 14px; }
+details.console summary { cursor: pointer; color: var(--mist); font-size: 13px; }
+.console form { display: flex; gap: 6px; margin-top: 8px; }
+.console input { flex: 1; min-width: 0; background: var(--ocean); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font-family: var(--mono); font-size: 13px; }
+.console pre { margin: 8px 0 0; white-space: pre-wrap; font: 12.5px/1.4 var(--mono); color: var(--mist); max-height: 220px; overflow: auto; }
+.offline { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); background: var(--danger); color: var(--ink); padding: 6px 14px;
+  border-radius: 999px; font-weight: 700; }
+
+/* board */
+.hex-base { stroke: #0b1d27; stroke-width: 2.5; }
+.sea { fill: #15485f; stroke: #0f3a4e; stroke-width: 2; }
+.token { fill: var(--parchment); stroke: #8e7b57; stroke-width: 1.5; }
+.tok-num { font: 800 21px var(--display); text-anchor: middle; fill: var(--ink); }
+.tok-num.hot { fill: #b5241d; }
+.pip { fill: var(--ink); }
+.pip.hot { fill: #b5241d; }
+.hexlbl { font: 700 11px var(--body); fill: rgba(255,255,255,.62); text-anchor: middle; paint-order: stroke; stroke: rgba(0,0,0,.35); stroke-width: 2px; }
+.vlbl { font: 700 9.5px var(--body); fill: #dfe9ec; paint-order: stroke; stroke: #0b2230; stroke-width: 2.6px; pointer-events: none; }
+.vlbl.port { fill: #8fe3ff; }
+.road-under { stroke: #111; stroke-width: 11; stroke-linecap: round; }
+.road { stroke-width: 7; stroke-linecap: round; }
+.edge-hit { stroke: transparent; stroke-width: 16; stroke-linecap: round; }
+.edge-legal { stroke: var(--glow); stroke-width: 6; stroke-linecap: round; stroke-dasharray: 2 9; opacity: .95; pointer-events: none; }
+.edge-hit.legal { cursor: pointer; }
+.edge-hit.legal:hover { stroke: rgba(255, 217, 94, .45); }
+.v-hit { fill: transparent; }
+.v-legal { fill: rgba(255, 217, 94, .22); stroke: var(--glow); stroke-width: 2.5; pointer-events: none; animation: pulse 1.6s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+.v-hit.legal { cursor: pointer; }
+.v-hit.legal:hover { fill: rgba(255, 217, 94, .5); }
+.city-ring { fill: none; stroke: var(--glow); stroke-width: 2.5; stroke-dasharray: 4 4; pointer-events: none; }
+@keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.25); } }
+.bld { stroke: #111; stroke-width: 1.6; stroke-linejoin: round; }
+.hex-target { fill: transparent; stroke: none; }
+.hex-target.legal { cursor: pointer; fill: rgba(255, 217, 94, .08); stroke: var(--glow); stroke-width: 3; stroke-dasharray: 8 6; }
+.hex-target.legal:hover { fill: rgba(255, 217, 94, .25); }
+.hex-target.picked { fill: rgba(255, 217, 94, .3); stroke: var(--glow); stroke-width: 3.5; }
+.rolled-ring { fill: none; stroke: var(--glow); stroke-width: 3; opacity: .8; }
+.robber { fill: #2a2a2e; stroke: #000; stroke-width: 1.5; }
+.pier { stroke: #8a6a43; stroke-width: 5; stroke-linecap: round; }
+.port-tok { fill: var(--parchment); stroke-width: 4; }
+.port-txt { font: 800 13px var(--display); text-anchor: middle; fill: var(--ink); }
+.port-sub { font: 700 7.5px var(--body); text-anchor: middle; fill: var(--ink); text-transform: uppercase; letter-spacing: .02em; }
+.flash { animation: flash 1.2s ease-out 2; }
+@keyframes flash { 0% { opacity: 1; } 50% { opacity: .25; } 100% { opacity: 1; } }
+
+@media (max-width: 1000px) {
+  .layout { grid-template-columns: minmax(0, 1fr); }
+  .side { border-left: 0; border-top: 1px solid var(--line); }
+  .board-wrap { position: relative; height: auto; padding-top: 44px; }
+  #board { height: auto; }
+  .log { max-height: 340px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .v-legal, .flash, .banner.waiting .what::after { animation: none; }
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand">Catan<small id="seed"></small></div>
+  <div class="turninfo" id="turninfo">Connecting…</div>
+  <div class="dice" id="dice"></div>
+  <div class="spacer"></div>
+  <div class="bank" id="bank"></div>
+</header>
+<div class="layout">
+  <section class="board-wrap">
+    <div class="board-tools">
+      <button class="chipbtn" id="tog-num" aria-pressed="true" title="Show intersection numbers (the CLI and the log use them)">Numbers</button>
+    </div>
+    <svg id="board" role="img" aria-label="Catan board"></svg>
+  </section>
+  <aside class="side">
+    <div class="banner" id="banner"><div class="what">Loading the table…</div></div>
+    <div class="panel" id="actions"></div>
+    <div class="panel" id="hand-panel"><h3>Your hand</h3><div id="hand"></div></div>
+    <div class="panel"><h3>Table</h3><div class="players" id="players"></div></div>
+    <div class="log" id="log" aria-live="polite"></div>
+    <details class="console" id="console">
+      <summary>Command line</summary>
+      <form id="cmdform" autocomplete="off">
+        <input id="cmd" placeholder="e.g.  ?   r 12 13   offer 2b for o" aria-label="Command">
+        <button class="btn" type="submit">Run</button>
+      </form>
+      <pre id="out"></pre>
+    </details>
+  </aside>
+</div>
+<div class="offline" id="offline" hidden>Lost connection to catan serve — retrying</div>
+
+<script>
+"use strict";
+const RES = ["brick", "lumber", "wool", "grain", "ore"];
+const RES_NAME = { brick: "Brick", lumber: "Lumber", wool: "Wool", grain: "Grain", ore: "Ore" };
+const RES_KEY = { brick: "b", lumber: "l", wool: "w", grain: "g", ore: "o" };
+const TERRAIN = { brick: "Hills", lumber: "Forest", wool: "Pasture", grain: "Fields", ore: "Mountains", desert: "Desert" };
+const FILL = { brick: "#c8622f", lumber: "#2f6d3f", wool: "#9cc65b", grain: "#e3b73d", ore: "#8b95a2", desert: "#e0cd9a" };
+const PC = { red: "#d33a3a", blue: "#2f6fd6", orange: "#f08c1c", white: "#f1ede4" };
+const DEV_HELP = {
+  knight: "Move the robber and steal a card.",
+  road_building: "Place two free roads.",
+  year_of_plenty: "Take any two resources from the bank.",
+  monopoly: "Take every card of one resource from the other players.",
+  victory_point: "Worth 1 VP. Counts automatically.",
+};
+const R = 56, UX = R * Math.sqrt(3) / 2, UY = R / 2;
+const CORNERS = [[0, -2], [1, -1], [1, 1], [0, 2], [-1, 1], [-1, -1]];
+
+const params = new URLSearchParams(location.search);
+const seatParam = params.get("as");
+let state = null, version = "", busy = false;
+const ui = { mode: null, robHex: null, numbers: true, key: "", offerOpen: false,
+  offer: { give: {}, get: {}, to: "" }, discard: {}, bankGive: "", bankGet: "", yop: ["", ""], mono: "",
+  msg: null, msgErr: false };
+try { ui.numbers = localStorage.getItem("catan-numbers") !== "off"; } catch (e) {}
+
+const $ = (sel) => document.querySelector(sel);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const P = (x, y) => [x * UX, y * UY];
+const hexPoints = (cx, cy) => CORNERS.map(([dx, dy]) => P(cx + dx, cy + dy).map((n) => n.toFixed(1)).join(",")).join(" ");
+const sum = (o) => Object.values(o).reduce((a, b) => a + b, 0);
+
+// ------------------------------------------------------------------ server
+async function poll() {
+  for (;;) {
+    try {
+      const q = new URLSearchParams({ since: version || "" });
+      if (seatParam) q.set("as", seatParam);
+      const r = await fetch("/api/state?" + q);
+      const s = await r.json();
+      $("#offline").hidden = true;
+      if (s.error) { showMsg("! " + s.error, true); await sleep(3000); continue; }
+      if (s.version !== version) { version = s.version; setState(s); }
+    } catch (e) {
+      $("#offline").hidden = false;
+      await sleep(2000);
+    }
+  }
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function send(cmd, opts = {}) {
+  if (busy) return;
+  busy = true; document.body.style.cursor = "progress";
+  try {
+    const r = await fetch("/api/command", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cmd, as: seatParam }) });
+    const res = await r.json();
+    const lines = (res.output || []).flatMap((l) => l.split("\n"));
+    res.lines = lines;
+    const err = !res.ok;
+    if (opts.console || lines.some((l) => !l.startsWith("!")) && opts.console !== false) {
+      $("#out").textContent = (lines.join("\n") || (res.ok ? "ok" : "")).trim();
+    }
+    if (err) showMsg(lines.filter((l) => l.startsWith("!")).join("\n").replace(/^! ?/gm, "") || "That didn't work.", true);
+    else { ui.msg = null; if (!opts.console && opts.console !== false) { ui.mode = null; ui.robHex = null; } }
+    if (res.state) { version = res.state.version; setState(res.state, true); }
+    return res;
+  } catch (e) {
+    showMsg("Couldn't reach catan serve.", true);
+  } finally {
+    busy = false; document.body.style.cursor = "";
+  }
+}
+function showMsg(text, isErr) { ui.msg = text; ui.msgErr = isErr; renderActions(); }
+
+function setState(s, fromCommand) {
+  const key = [s.phase, s.turn, s.setupRound, s.setupExpect, s.trade && s.trade.stage, s.yourMove].join("|");
+  if (key !== ui.key) {
+    ui.key = key;
+    ui.mode = null; ui.robHex = null; ui.discard = {};
+    if (!fromCommand) ui.msg = null;
+    if (s.phase !== "main") ui.offer = { give: {}, get: {}, to: "" };
+  }
+  state = s;
+  render();
+}
+
+// ------------------------------------------------------------------ render
+function render() {
+  if (!state) return;
+  renderTop(); renderBoard(); renderBanner(); renderActions(); renderHand(); renderPlayers(); renderLog();
+}
+
+function playerName(p) { return state.players[p] ? state.players[p].name : "?"; }
+function you() { return state.you; }
+function L() { return state.legal || {}; }
+
+function dieSVG(n) {
+  const spots = { 1: [[2, 2]], 2: [[1, 1], [3, 3]], 3: [[1, 1], [2, 2], [3, 3]], 4: [[1, 1], [3, 1], [1, 3], [3, 3]],
+    5: [[1, 1], [3, 1], [2, 2], [1, 3], [3, 3]], 6: [[1, 1], [3, 1], [1, 2], [3, 2], [1, 3], [3, 3]] }[n] || [];
+  return `<svg viewBox="0 0 40 40" aria-label="die showing ${n}"><rect x="2" y="2" width="36" height="36" rx="8" fill="#f3ead6" stroke="#8e7b57" stroke-width="2"/>`
+    + spots.map(([x, y]) => `<circle cx="${x * 10}" cy="${y * 10}" r="3.6" fill="#1d1a14"/>`).join("") + "</svg>";
+}
+
+function renderTop() {
+  const s = state;
+  $("#seed").textContent = `seed ${s.seed}`;
+  let t;
+  if (s.phase === "game_over") t = `Game over · <b>${esc(playerName(s.winner))}</b> wins`;
+  else if (s.phase === "setup") t = `Setup round ${s.setupRound} · <b>${esc(playerName(s.current))}</b> to place a ${s.setupExpect}`;
+  else t = `Turn ${s.turn} · <b>${esc(playerName(s.current))}</b>`;
+  $("#turninfo").innerHTML = t;
+  const d = $("#dice");
+  d.innerHTML = s.lastRoll ? dieSVG(s.lastRoll[0]) + dieSVG(s.lastRoll[1]) : "";
+  d.classList.toggle("stale", !s.rolled);
+  d.title = s.lastRoll ? `Last roll: ${s.lastRoll[0] + s.lastRoll[1]}` : "";
+  $("#bank").innerHTML = "Bank " + RES.map((r) => `<span title="${RES_NAME[r]} in the bank"><i style="background:${FILL[r]}"></i>${s.bank[r]}</span>`).join("")
+    + `<span title="Development cards left">Dev ${s.devDeck}</span>`;
+}
+
+function roadsClickable() {
+  const s = state;
+  if (!s.yourMove || !L().roads) return false;
+  if (s.phase === "setup") return s.setupExpect === "road";
+  if (s.phase === "road_building") return true;
+  return s.phase === "main" && L().afford && L().afford.road;
+}
+function robberTargeting() {
+  return state.yourMove && L().robber && (state.phase === "robber" || ui.mode === "knight");
+}
+
+function renderBoard() {
+  const s = state, g = s.geometry;
+  const svg = $("#board");
+  const minX = -2 * UX - 30, minY = -3 * UY - 34, w = 14 * UX + 60, h = 22 * UY + 68;
+  svg.setAttribute("viewBox", `${minX.toFixed(0)} ${minY.toFixed(0)} ${w.toFixed(0)} ${h.toFixed(0)}`);
+  const out = [];
+  out.push(`<defs>
+    <pattern id="pat-lumber" width="16" height="16" patternUnits="userSpaceOnUse"><path d="M8 2 L13 11 H3 Z" fill="rgba(0,0,0,.2)"/><rect x="7" y="11" width="2" height="3" fill="rgba(0,0,0,.2)"/></pattern>
+    <pattern id="pat-wool" width="15" height="15" patternUnits="userSpaceOnUse"><circle cx="4" cy="4" r="2.2" fill="rgba(255,255,255,.4)"/><circle cx="11.5" cy="10.5" r="2.2" fill="rgba(255,255,255,.4)"/></pattern>
+    <pattern id="pat-grain" width="9" height="9" patternUnits="userSpaceOnUse" patternTransform="rotate(28)"><line x1="0" y1="0" x2="0" y2="9" stroke="rgba(120,80,0,.25)" stroke-width="3"/></pattern>
+    <pattern id="pat-brick" width="18" height="10" patternUnits="userSpaceOnUse"><path d="M0 .5H18M0 5.5H18M6 .5V5.5M15 5.5V10.5" stroke="rgba(60,20,0,.3)" stroke-width="1.3" fill="none"/></pattern>
+    <pattern id="pat-ore" width="22" height="15" patternUnits="userSpaceOnUse"><path d="M2 13 L9 4 L16 13" stroke="rgba(255,255,255,.3)" stroke-width="1.6" fill="none"/></pattern>
+    <pattern id="pat-desert" width="26" height="13" patternUnits="userSpaceOnUse"><path d="M0 9 Q6.5 4 13 9 T26 9" stroke="rgba(140,100,40,.3)" stroke-width="1.3" fill="none"/></pattern>
+    <pattern id="pat-sea" width="34" height="18" patternUnits="userSpaceOnUse"><path d="M0 9 Q8.5 4 17 9 T34 9" stroke="rgba(255,255,255,.08)" stroke-width="1.4" fill="none"/></pattern>
+  </defs>`);
+  // sea ring
+  const land = new Set(g.hexes.map(([x, y]) => x + "," + y));
+  for (let r = -1; r <= 5; r++) {
+    const count = 7 - Math.abs(r - 2);
+    for (let i = 0; i < count; i++) {
+      const cx = Math.abs(2 - r) + 2 * i - 1, cy = 3 * r + 2;
+      if (land.has(cx + "," + cy)) continue;
+      out.push(`<polygon class="sea" points="${hexPoints(cx, cy)}"/><polygon points="${hexPoints(cx, cy)}" fill="url(#pat-sea)"/>`);
+    }
+  }
+  // harbours
+  g.portSlots.forEach((slot, k) => {
+    const kind = s.portTypes[k];
+    const [hx, hy] = P(...g.hexes[slot.hex]);
+    const [ax, ay] = P(...g.vertices[slot.a]), [bx, by] = P(...g.vertices[slot.b]);
+    const mx = (ax + bx) / 2, my = (ay + by) / 2;
+    const dx = mx - hx, dy = my - hy, len = Math.hypot(dx, dy);
+    const tx = mx + dx / len * R * 0.68, ty = my + dy / len * R * 0.68;
+    const ring = kind === "any" ? "#8e7b57" : FILL[kind];
+    out.push(`<line class="pier" x1="${ax}" y1="${ay}" x2="${tx}" y2="${ty}"/><line class="pier" x1="${bx}" y1="${by}" x2="${tx}" y2="${ty}"/>`);
+    out.push(`<g><title>${kind === "any" ? "3:1 harbour: trade any 3 identical cards for 1" : "2:1 " + RES_NAME[kind] + " harbour"} (intersections ${slot.a} and ${slot.b})</title>
+      <circle class="port-tok" cx="${tx}" cy="${ty}" r="20" stroke="${ring}"/>
+      <text class="port-txt" x="${tx}" y="${ty + (kind === "any" ? 4.5 : 1)}">${kind === "any" ? "3:1" : "2:1"}</text>
+      ${kind === "any" ? "" : `<text class="port-sub" x="${tx}" y="${ty + 11}">${RES_NAME[kind]}</text>`}</g>`);
+  });
+  // land
+  const rolledSum = s.rolled && s.lastRoll ? s.lastRoll[0] + s.lastRoll[1] : null;
+  g.hexes.forEach(([cx, cy], hIdx) => {
+    const t = s.terrain[hIdx], num = s.numbers[hIdx];
+    const pts = hexPoints(cx, cy);
+    const [x, y] = P(cx, cy);
+    out.push(`<polygon class="hex-base" points="${pts}" fill="${FILL[t]}"/><polygon points="${pts}" fill="url(#pat-${t})"/>`);
+    if (num && num === rolledSum && s.robber !== hIdx) out.push(`<polygon class="rolled-ring" points="${hexPoints(cx, cy)}" transform="translate(${x} ${y}) scale(.86) translate(${-x} ${-y})"/>`);
+    out.push(`<text class="hexlbl" x="${x}" y="${y - R * 0.55}">${g.hexLabels[hIdx]}</text>`);
+    if (num) {
+      const hot = num === 6 || num === 8 ? " hot" : "";
+      const pips = g.pips[num];
+      out.push(`<circle class="token" cx="${x}" cy="${y + 2}" r="19"/><text class="tok-num${hot}" x="${x}" y="${y + 7}">${num}</text>`);
+      for (let i = 0; i < pips; i++) out.push(`<circle class="pip${hot}" cx="${x + (i - (pips - 1) / 2) * 4.6}" cy="${y + 14}" r="1.6"/>`);
+    }
+    if (s.robber === hIdx) {
+      const rx = num ? x - 31 : x, ry = y + 4;
+      out.push(`<g class="robber" aria-label="robber"><title>The robber</title><circle cx="${rx}" cy="${ry - 15}" r="6.5"/><path d="M${rx - 9} ${ry + 13} Q${rx - 9} ${ry - 9} ${rx} ${ry - 9} Q${rx + 9} ${ry - 9} ${rx + 9} ${ry + 13} Z"/></g>`);
+    }
+  });
+  // robber targets
+  const targeting = robberTargeting();
+  g.hexes.forEach(([cx, cy], hIdx) => {
+    const legal = targeting && L().robber[String(hIdx)] !== undefined;
+    const cls = "hex-target" + (legal ? " legal" : "") + (ui.robHex === hIdx ? " picked" : "");
+    const info = `${g.hexLabels[hIdx]}: ${TERRAIN[s.terrain[hIdx]]}${s.numbers[hIdx] ? " " + s.numbers[hIdx] : ""}`;
+    out.push(`<polygon class="${cls}" data-h="${hIdx}" points="${hexPoints(cx, cy)}"><title>${info}</title></polygon>`);
+  });
+  // roads
+  const roadsOn = roadsClickable();
+  const legalRoads = new Set((L().roads || []).map(([a, b]) => a + "-" + b));
+  for (const [a, b, p] of s.roads) {
+    const [x1, y1, x2, y2] = edgeEnds(a, b);
+    out.push(`<line class="road-under" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/><line class="road" stroke="${PC[s.players[p].color]}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"><title>${esc(playerName(p))}'s road ${a}-${b}</title></line>`);
+  }
+  for (const [a, b] of g.edges) {
+    const legal = roadsOn && legalRoads.has(a + "-" + b);
+    const [x1, y1, x2, y2] = edgeEnds(a, b);
+    if (legal) out.push(`<line class="edge-legal" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>`);
+    out.push(`<line class="edge-hit${legal ? " legal" : ""}" data-e="${a}-${b}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"><title>Road ${a}-${b}</title></line>`);
+  }
+  // buildings and intersections
+  const bmap = new Map(s.buildings.map(([v, p, k]) => [v, [p, k]]));
+  const lg = L();
+  const setLegal = new Set(state.yourMove && (s.phase === "setup" || (lg.afford && lg.afford.settlement)) ? (lg.settlements || []) : []);
+  const cityLegal = new Set(state.yourMove && lg.afford && lg.afford.city ? (lg.cities || []) : []);
+  const portV = new Set(g.portSlots.flatMap((p) => [p.a, p.b]));
+  g.vertices.forEach(([vx, vy], v) => {
+    const [x, y] = P(vx, vy);
+    const b = bmap.get(v);
+    if (b) {
+      const [p, kind] = b;
+      out.push(buildingSVG(x, y, PC[s.players[p].color], kind, `${playerName(p)}'s ${kind} on ${v}`));
+      if (cityLegal.has(v)) out.push(`<circle class="city-ring" cx="${x}" cy="${y - 2}" r="19"/>`);
+    }
+    if (setLegal.has(v)) out.push(`<circle class="v-legal" cx="${x}" cy="${y}" r="9"/>`);
+    const clickable = setLegal.has(v) || cityLegal.has(v);
+    out.push(`<circle class="v-hit${clickable ? " legal" : ""}" data-v="${v}" cx="${x}" cy="${y}" r="${b ? 15 : 11}"><title>${esc(vertexInfo(v))}</title></circle>`);
+    if (ui.numbers && !b) {
+      // Put the number beside the vertical path: above for top corners, below otherwise.
+      out.push(`<text class="vlbl${portV.has(v) ? " port" : ""}" x="${x + 7}" y="${y + (vy % 3 === 0 ? -6 : 13)}">${v}</text>`);
+    }
+  });
+  svg.innerHTML = out.join("");
+}
+
+function edgeEnds(a, b) {
+  const [ax, ay] = P(...state.geometry.vertices[a]), [bx, by] = P(...state.geometry.vertices[b]);
+  const k = 0.17;
+  return [ax + (bx - ax) * k, ay + (by - ay) * k, bx + (ax - bx) * k, by + (ay - by) * k].map((n) => n.toFixed(1));
+}
+
+function buildingSVG(x, y, color, kind, label) {
+  if (kind === "city") {
+    const d = `M${x - 14} ${y + 9} V${y - 3} L${x - 7} ${y - 10} L${x} ${y - 3} H${x + 13} V${y + 9} Z M${x} ${y - 3} V${y + 9}`;
+    return `<path class="bld" d="${d}" fill="${color}"><title>${esc(label)}</title></path>`;
+  }
+  const d = `M${x - 8} ${y + 8} V${y - 2} L${x} ${y - 10} L${x + 8} ${y - 2} V${y + 8} Z`;
+  return `<path class="bld" d="${d}" fill="${color}"><title>${esc(label)}</title></path>`;
+}
+
+function vertexInfo(v) {
+  const s = state, g = s.geometry;
+  const parts = [];
+  let pips = 0;
+  g.hexes.forEach(([cx, cy], h) => {
+    const near = CORNERS.some(([dx, dy]) => cx + dx === g.vertices[v][0] && cy + dy === g.vertices[v][1]);
+    if (!near) return;
+    const n = s.numbers[h];
+    if (n) pips += g.pips[n];
+    parts.push(`${TERRAIN[s.terrain[h]]}${n ? " " + n : ""}`);
+  });
+  let port = "";
+  g.portSlots.forEach((p, k) => { if (p.a === v || p.b === v) port = s.portTypes[k] === "any" ? " · 3:1 harbour" : ` · 2:1 ${RES_NAME[s.portTypes[k]]} harbour`; });
+  return `Intersection ${v}: ${parts.join(", ")} (${pips} pips)${port}`;
+}
+
+function bannerText() {
+  const s = state;
+  if (s.phase === "game_over") {
+    const w = s.winner === (s.you && s.you.seat);
+    return [w ? "You win!" : `${playerName(s.winner)} wins`, `Final score: ${s.players.map((p) => `${p.name} ${p.vp}`).join(" · ")}`, ""];
+  }
+  if (!s.you) return ["Watching", s.hint, ""];
+  if (!s.yourMove) {
+    const who = s.pending.map((p) => playerName(p) + (s.players[p].kind === "agent" ? " (agent)" : "")).join(", ");
+    if (s.trade && s.trade.from === s.you.seat) return ["Waiting for answers", "Your offer is out: " + who + " still deciding.", "waiting"];
+    return [`Waiting for ${who}`, s.phase === "setup" ? "They're placing pieces." : "Their move. The board updates by itself.", "waiting"];
+  }
+  if (ui.mode === "knight") return ["Play your Knight", "Click a hex to move the robber there.", "yours"];
+  switch (s.phase) {
+    case "setup": return s.setupExpect === "settlement"
+      ? [`Place settlement ${s.setupRound === 1 ? "one" : "two"}`, "Click a glowing intersection." + (s.setupRound === 2 ? " This one pays out starting resources." : ""), "yours"]
+      : ["Place its road", "Click a glowing path next to the settlement you just placed.", "yours"];
+    case "roll": return ["Your turn", "Roll the dice. You can play a development card first.", "yours"];
+    case "discard": return [`Discard ${L().discard} cards`, "A 7 was rolled and you hold more than 7 cards.", "yours"];
+    case "robber": return ["Move the robber", "Click a hex. You'll steal a card from someone with a building there.", "yours"];
+    case "road_building": return [`Place ${s.freeRoads} free road${s.freeRoads === 1 ? "" : "s"}`, "Click glowing paths.", "yours"];
+    case "trade": return s.trade.stage === "respond"
+      ? ["Trade offer", `${playerName(s.trade.from)} wants to trade with you.`, "yours"]
+      : ["Choose a partner", "More than one player accepted your offer.", "yours"];
+    default: return ["Your turn", "Build on the glowing spots, trade, or play a card.", "yours"];
+  }
+}
+
+function renderBanner() {
+  const [what, sub, cls] = bannerText();
+  const b = $("#banner");
+  b.className = "banner " + cls;
+  b.innerHTML = `<div class="what">${esc(what)}</div>` + (sub ? `<div class="sub">${esc(sub)}</div>` : "");
+}
+
+function costChips(cost) {
+  return `<span class="cost">` + RES.flatMap((r) => Array(cost[r] || 0).fill(`<i style="background:${FILL[r]}" title="${RES_NAME[r]}"></i>`)).join("") + `</span>`;
+}
+function cardsText(cards) {
+  return RES.filter((r) => cards[r]).map((r) => `${cards[r]} ${RES_NAME[r].toLowerCase()}`).join(", ");
+}
+function cardsArg(cards) {
+  return RES.filter((r) => cards[r]).map((r) => `${cards[r]}${RES_KEY[r]}`).join(" ");
+}
+function playerKey(p) { return state.players[p].color; }
+
+function stepper(group, r, value, max) {
+  return `<div class="step"><span class="res-dot" style="background:${FILL[r]}"></span><span class="lbl">${RES_NAME[r]}</span>
+    <div class="ctl"><button type="button" data-step="${group}" data-r="${r}" data-d="-1" ${value <= 0 ? "disabled" : ""} aria-label="fewer ${RES_NAME[r]}">−</button>
+    <span class="v">${value}</span><button type="button" data-step="${group}" data-r="${r}" data-d="1" ${value >= max ? "disabled" : ""} aria-label="more ${RES_NAME[r]}">+</button></div></div>`;
+}
+
+function renderActions() {
+  const s = state, el = $("#actions");
+  if (!s) return;
+  const h = [];
+  const me = s.you;
+  if (s.phase === "game_over") {
+    h.push(`<div class="stack">` + s.players.map((p) => `<div><b>${esc(p.name)}</b> · ${p.vp} VP${p.hand ? ` · held ${sum(p.hand)} cards` : ""}</div>`).join("") + `</div>`);
+  } else if (!me) {
+    h.push(`<p class="muted">This page has no seat. Start it with <code>catan serve --as red</code> to play.</p>`);
+  } else if (!s.yourMove) {
+    h.push(`<p class="muted small">${esc(s.hint)}</p>`);
+  } else if (ui.mode === "knight") {
+    h.push(robberPicker("k"));
+    h.push(`<div class="row" style="margin-top:8px"><button class="btn ghost" data-act="cancel-mode">Cancel</button></div>`);
+  } else if (ui.mode === "yop") {
+    h.push(`<div class="subhead">Year of Plenty: pick two resources</div><div class="row">`
+      + [0, 1].map((i) => `<select class="sel" id="yop-${i}" data-yop="${i}"><option value="">Choose…</option>${RES.map((r) => `<option value="${r}" ${ui.yop[i] === r ? "selected" : ""}>${RES_NAME[r]} (${s.bank[r]} left)</option>`).join("")}</select>`).join("")
+      + `<button class="btn primary" data-act="yop" ${ui.yop[0] && ui.yop[1] ? "" : "disabled"}>Take them</button><button class="btn ghost" data-act="cancel-mode">Cancel</button></div>`);
+  } else if (ui.mode === "mono") {
+    h.push(`<div class="subhead">Monopoly: everyone gives you all of one resource</div><div class="row">
+      <select class="sel" id="mono" data-mono="1"><option value="">Choose…</option>${RES.map((r) => `<option value="${r}" ${ui.mono === r ? "selected" : ""}>${RES_NAME[r]}</option>`).join("")}</select>
+      <button class="btn primary" data-act="mono" ${ui.mono ? "" : "disabled"}>Take them all</button><button class="btn ghost" data-act="cancel-mode">Cancel</button></div>`);
+  } else {
+    switch (s.phase) {
+      case "setup":
+        h.push(`<p class="muted small">${s.setupExpect === "settlement" ? "Settlements can't touch another building. Hover a spot to see what it produces." : "The road must touch the settlement you just placed."}</p>`);
+        break;
+      case "roll":
+        h.push(`<div class="row"><button class="btn primary big" data-act="roll">Roll the dice</button></div>`);
+        break;
+      case "discard": {
+        const need = L().discard, chosen = sum(ui.discard);
+        h.push(`<div class="subhead">Choose ${need} cards to give back (${chosen} chosen)</div><div class="picker">`
+          + RES.map((r) => stepper("discard", r, ui.discard[r] || 0, me.hand[r])).join("") + `</div>`
+          + `<div class="row" style="margin-top:10px"><button class="btn primary" data-act="discard" ${chosen === need ? "" : "disabled"}>Discard ${need}</button>
+             <button class="btn ghost" data-act="suggest-discard">Suggest</button></div>`);
+        break;
+      }
+      case "robber":
+        h.push(robberPicker("rob"));
+        break;
+      case "road_building":
+        h.push(`<div class="row"><button class="btn" data-act="stop-rb">Stop placing roads</button></div>`);
+        break;
+      case "trade": {
+        const t = s.trade;
+        if (t.stage === "respond") {
+          h.push(`<div class="offer"><b>${esc(playerName(t.from))}</b> gives you <b>${esc(cardsText(t.give))}</b><br>for your <b>${esc(cardsText(t.get))}</b>
+            <div class="row" style="margin-top:10px"><button class="btn primary" data-act="accept">Accept</button><button class="btn" data-act="decline">Decline</button></div></div>`);
+        } else {
+          h.push(`<div class="row">` + t.acceptors.map((q) => `<button class="btn primary" data-act="pick" data-p="${playerKey(q)}">Trade with ${esc(playerName(q))}</button>`).join("")
+            + `<button class="btn ghost" data-act="cancel-trade">Withdraw offer</button></div>`);
+        }
+        break;
+      }
+      case "main":
+        h.push(mainPanel());
+        break;
+    }
+  }
+  if (ui.msg) h.push(`<div class="msg ${ui.msgErr ? "err" : "okmsg"}">${esc(ui.msg)}</div>`);
+  el.innerHTML = h.join("");
+}
+
+function robberPicker(cmd) {
+  const s = state;
+  if (ui.robHex === null) return `<p class="muted small">Glowing hexes are legal. You can't leave the robber where it is.</p>`;
+  const victims = L().robber[String(ui.robHex)] || [];
+  return `<div class="subhead">Steal from whom on ${s.geometry.hexLabels[ui.robHex]}?</div><div class="row">`
+    + victims.map((q) => `<button class="btn primary" data-act="rob" data-cmd="${cmd}" data-p="${playerKey(q)}">${esc(playerName(q))} (${s.players[q].cards} cards)</button>`).join("")
+    + `<button class="btn ghost" data-act="unpick">Pick another hex</button></div>`;
+}
+
+function mainPanel() {
+  const s = state, me = s.you, lg = L();
+  const out = [];
+  const builds = [["road", "Road", "click a glowing path"], ["settlement", "Settlement", "click a glowing intersection"],
+    ["city", "City", "click a ringed settlement"], ["dev", "Development card", ""]];
+  out.push(`<div class="buildlist">` + builds.map(([k, label, how]) => {
+    const ok = lg.afford && lg.afford[k];
+    let note = ok ? how : "";
+    if (k === "settlement" && ok && !(lg.settlements || []).length) note = "no connected spot yet";
+    if (k === "city" && ok && !(lg.cities || []).length) note = "no settlement to upgrade";
+    return `${costChips(s.costs[k])}<span class="${ok ? "yes" : "no"}">${label}${note ? ` <span class="muted small">· ${note}</span>` : ""}</span>`;
+  }).join("") + `</div>`);
+  out.push(`<div class="row" style="margin-top:10px"><button class="btn" data-act="buy" ${lg.canBuyDev ? "" : "disabled"}>Buy development card</button>
+    <button class="btn primary" data-act="end">End turn</button></div>`);
+  // bank
+  const gives = RES.filter((r) => me.hand[r] >= me.ratios[r]);
+  if (!gives.includes(ui.bankGive)) ui.bankGive = gives[0] || "";
+  const gets = RES.filter((r) => r !== ui.bankGive && s.bank[r] > 0);
+  if (!gets.includes(ui.bankGet)) ui.bankGet = gets[0] || "";
+  out.push(`<div style="margin-top:14px"><div class="subhead">Trade with the bank</div>` + (gives.length
+    ? `<div class="row"><select class="sel" id="bank-give" data-bank="give">${gives.map((r) => `<option value="${r}" ${r === ui.bankGive ? "selected" : ""}>${me.ratios[r]} ${RES_NAME[r]}</option>`).join("")}</select>
+       <span class="muted">for 1</span>
+       <select class="sel" id="bank-get" data-bank="get">${gets.map((r) => `<option value="${r}" ${r === ui.bankGet ? "selected" : ""}>${RES_NAME[r]}</option>`).join("")}</select>
+       <button class="btn" data-act="bank" ${ui.bankGive && ui.bankGet ? "" : "disabled"}>Trade</button></div>`
+    : `<p class="muted small">You need ${RES.map((r) => `${me.ratios[r]} ${RES_NAME[r].toLowerCase()}`).join(", ")} for a bank trade.</p>`) + `</div>`);
+  // players
+  const others = s.players.map((p, i) => i).filter((i) => i !== me.seat);
+  const give = ui.offer.give, get = ui.offer.get;
+  const canOffer = sum(give) > 0 && sum(get) > 0 && !RES.some((r) => give[r] && get[r]);
+  out.push(`<details class="fold" id="offer-fold" ${ui.offerOpen ? "open" : ""}><summary>Offer a trade${others.length > 1 ? "" : " to " + esc(playerName(others[0]))}</summary>
+    <div class="small muted" style="margin-bottom:4px">You give</div><div class="picker">${RES.map((r) => stepper("give", r, give[r] || 0, me.hand[r])).join("")}</div>
+    <div class="small muted" style="margin:8px 0 4px">You get</div><div class="picker">${RES.map((r) => stepper("get", r, get[r] || 0, 9)).join("")}</div>
+    <div class="row" style="margin-top:10px">${others.length > 1 ? `<select class="sel" id="offer-to" data-offer-to="1"><option value="">To everyone</option>${others.map((q) => `<option value="${playerKey(q)}" ${ui.offer.to === playerKey(q) ? "selected" : ""}>To ${esc(playerName(q))}</option>`).join("")}</select>` : ""}
+    <button class="btn" data-act="offer" ${canOffer ? "" : "disabled"}>Make offer</button></div></details>`);
+  return out.join("");
+}
+
+function renderHand() {
+  const s = state, me = s.you, el = $("#hand");
+  $("#hand-panel").hidden = !me;
+  if (!me) return;
+  const out = [`<div class="cards">` + RES.map((r) => `<div class="card${me.hand[r] ? "" : " zero"}"><div class="swatch" style="background:${FILL[r]}"></div><div class="n">${me.hand[r]}</div><div class="lbl">${RES_NAME[r]}</div></div>`).join("") + `</div>`];
+  const canPlay = s.yourMove && (s.phase === "roll" || s.phase === "main") && !ui.mode;
+  if (me.devs.length) {
+    out.push(`<div class="devs">` + me.devs.map((d) => {
+      const note = d.card === "victory_point" ? "+1 VP" : d.new ? "bought this turn" : "";
+      const btn = d.playable && canPlay ? `<button class="btn" data-act="play" data-card="${d.card}">Play</button>` : "";
+      return `<div class="dev" title="${esc(DEV_HELP[d.card])}"><span class="name">${esc(d.name)}<span class="note">${note}</span></span>${btn}</div>`;
+    }).join("") + `</div>`);
+  }
+  const prod = RES.map((r) => `${RES_NAME[r]} ${me.production[r]}`).join(" · ");
+  out.push(`<div class="prodline" title="How many of the 36 dice combinations pay you each resource">Income per 36 rolls: ${prod}</div>`);
+  el.innerHTML = out.join("");
+}
+
+function renderPlayers() {
+  const s = state;
+  $("#players").innerHTML = s.players.map((p, i) => {
+    const isYou = s.you && s.you.seat === i;
+    const kind = isYou ? `<span class="kind you">you</span>` : `<span class="kind">${p.kind === "agent" ? "agent" : p.kind}</span>`;
+    const thinking = p.pending && !isYou && s.phase !== "game_over" ? `<span class="thinking">${p.kind === "agent" ? "thinking…" : "to move"}</span>` : "";
+    const badges = (p.longestRoad ? `<span class="badge">Longest Road</span>` : "") + (p.largestArmy ? `<span class="badge">Largest Army</span>` : "");
+    return `<div class="player${p.current ? " cur" : ""}" style="--pc:${PC[p.color]}">
+      <span class="chip"></span><span class="pname">${esc(p.name)}${kind}${thinking}</span><span class="vp">${p.vp}<small>VP</small></span>
+      <span class="stats">${p.cards} cards · ${p.devs} dev · ${p.knights} knights · road ${p.road}${badges}</span></div>`;
+  }).join("");
+}
+
+function renderLog() {
+  const s = state, el = $("#log");
+  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+  const names = s.players.map((p) => p.name).sort((a, b) => b.length - a.length);
+  const re = names.length ? new RegExp("(" + names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")", "g") : null;
+  const colorOf = Object.fromEntries(s.players.map((p) => [p.name, PC[p.color]]));
+  el.innerHTML = s.log.map((line) => {
+    const t = line.trim();
+    if (t.startsWith("==")) return `<div class="turn">${esc(t.replace(/=/g, "").trim())}</div>`;
+    if (t.startsWith("***")) return `<div class="win">${esc(t.replace(/\*/g, "").trim())}</div>`;
+    const html = re ? esc(t).replace(re, (m) => `<span class="pn" style="color:${colorOf[m]}">${m}</span>`) : esc(t);
+    return `<div>${html}</div>`;
+  }).join("");
+  if (atBottom || !el.dataset.init) { el.scrollTop = el.scrollHeight; el.dataset.init = "1"; }
+}
+
+// ------------------------------------------------------------------ events
+$("#board").addEventListener("click", (ev) => {
+  if (!state || busy) return;
+  const t = ev.target.closest("[data-v],[data-e],[data-h]");
+  if (!t) return;
+  const s = state, lg = L();
+  if (t.dataset.v !== undefined) {
+    const v = +t.dataset.v;
+    if (!s.yourMove) return;
+    if (s.phase === "setup" && s.setupExpect === "settlement" && (lg.settlements || []).includes(v)) return send(`s ${v}`);
+    if (s.phase === "main") {
+      if ((lg.cities || []).includes(v) && lg.afford.city) return send(`c ${v}`);
+      if ((lg.settlements || []).includes(v) && lg.afford.settlement) return send(`s ${v}`);
+    }
+    return;
+  }
+  if (t.dataset.e !== undefined) {
+    if (!roadsClickable()) return;
+    const [a, b] = t.dataset.e.split("-");
+    if ((lg.roads || []).some(([x, y]) => x === +a && y === +b)) send(`r ${a} ${b}`);
+    return;
+  }
+  if (t.dataset.h !== undefined && robberTargeting()) {
+    const h = +t.dataset.h;
+    const victims = lg.robber[String(h)];
+    if (victims === undefined) return;
+    const cmd = s.phase === "robber" ? "rob" : "k";
+    if (victims.length > 1) { ui.robHex = h; renderBoard(); renderActions(); return; }
+    send(`${cmd} ${s.geometry.hexLabels[h]}`);
+  }
+});
+
+document.addEventListener("click", (ev) => {
+  const b = ev.target.closest("[data-act],[data-step]");
+  if (!b || !state || b.disabled) return;
+  if (b.dataset.step) {
+    const group = b.dataset.step, r = b.dataset.r, d = +b.dataset.d;
+    const bag = group === "discard" ? ui.discard : ui.offer[group];
+    bag[r] = Math.max(0, (bag[r] || 0) + d);
+    renderActions();
+    return;
+  }
+  const act = b.dataset.act, s = state;
+  switch (act) {
+    case "roll": return send("r");
+    case "end": return send("e");
+    case "buy": return send("dev");
+    case "accept": return send("y");
+    case "decline": return send("n");
+    case "pick": return send(`pick ${b.dataset.p}`);
+    case "cancel-trade": return send("cancel");
+    case "stop-rb": return send("stop");
+    case "discard": return send(`d ${cardsArg(ui.discard)}`);
+    case "suggest-discard": return send("?", { console: false }).then((res) => {
+      const line = res && (res.lines || []).find((l) => l.startsWith("Suggested: d "));
+      if (!line) return;
+      ui.discard = {};
+      line.replace("Suggested: d ", "").split(" ").forEach((tok) => {
+        const m = tok.match(/^(\d*)([blwgo])$/);
+        if (!m) return;
+        const r = RES.find((x) => RES_KEY[x] === m[2]);
+        ui.discard[r] = (ui.discard[r] || 0) + (m[1] ? +m[1] : 1);
+      });
+      renderActions();
+    });
+    case "bank": return send(`bank ${RES_KEY[ui.bankGive]} ${RES_KEY[ui.bankGet]}`);
+    case "offer": {
+      const to = ui.offer.to ? ` to ${ui.offer.to}` : "";
+      return send(`offer ${cardsArg(ui.offer.give)} for ${cardsArg(ui.offer.get)}${to}`).then((res) => {
+        if (res && res.ok) ui.offer = { give: {}, get: {}, to: ui.offer.to };
+        renderActions();
+      });
+    }
+    case "rob": return send(`${b.dataset.cmd} ${s.geometry.hexLabels[ui.robHex]} ${b.dataset.p}`);
+    case "unpick": ui.robHex = null; renderBoard(); renderActions(); return;
+    case "cancel-mode": ui.mode = null; ui.robHex = null; render(); return;
+    case "yop": return send(`yop ${RES_KEY[ui.yop[0]]} ${RES_KEY[ui.yop[1]]}`);
+    case "mono": return send(`mono ${RES_KEY[ui.mono]}`);
+    case "play": {
+      const card = b.dataset.card;
+      if (card === "road_building") return send("rb");
+      ui.mode = { knight: "knight", year_of_plenty: "yop", monopoly: "mono" }[card] || null;
+      ui.robHex = null; ui.yop = ["", ""]; ui.mono = "";
+      render();
+      return;
+    }
+  }
+});
+
+document.addEventListener("toggle", (ev) => {
+  if (ev.target.id === "offer-fold") ui.offerOpen = ev.target.open;
+}, true);
+
+document.addEventListener("change", (ev) => {
+  const t = ev.target;
+  if (t.dataset.bank) { ui[t.dataset.bank === "give" ? "bankGive" : "bankGet"] = t.value; renderActions(); }
+  else if (t.dataset.yop !== undefined) { ui.yop[+t.dataset.yop] = t.value; renderActions(); }
+  else if (t.dataset.mono) { ui.mono = t.value; renderActions(); }
+  else if (t.dataset.offerTo) { ui.offer.to = t.value; }
+});
+
+$("#cmdform").addEventListener("submit", (ev) => {
+  ev.preventDefault();
+  const v = $("#cmd").value.trim();
+  if (!v) return;
+  send(v, { console: true }).then(() => { $("#cmd").select(); });
+});
+
+$("#tog-num").addEventListener("click", () => {
+  ui.numbers = !ui.numbers;
+  $("#tog-num").setAttribute("aria-pressed", String(ui.numbers));
+  try { localStorage.setItem("catan-numbers", ui.numbers ? "on" : "off"); } catch (e) {}
+  if (state) renderBoard();
+});
+$("#tog-num").setAttribute("aria-pressed", String(ui.numbers));
+
+poll();
+</script>
+</body>
+</html>

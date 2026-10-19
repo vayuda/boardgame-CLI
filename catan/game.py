@@ -1,4 +1,4 @@
-"""Rules engine for the classic Catan base game (3-4 players).
+"""Rules engine for the classic Catan base game (2-4 players).
 
 The engine is a pure state machine: every move is a method call that
 either changes the state or raises IllegalAction.  It never prompts.
@@ -9,7 +9,9 @@ either changes the state or raises IllegalAction.  It never prompts.
 from __future__ import annotations
 
 import json
+import os
 import random
+import tempfile
 from collections import Counter
 
 from .board import (DESERT, EDGES, HEX_VERTICES, NUM_EDGES, NUM_HEXES, NUM_VERTICES,
@@ -52,10 +54,11 @@ def edge_name(e: int) -> str:
 
 
 class Player:
-    def __init__(self, name: str, color: str, bot: bool):
+    def __init__(self, name: str, color: str, bot: bool, agent: bool = False):
         self.name = name
         self.color = color
-        self.bot = bot
+        self.bot = bot          # moved by the built-in bots
+        self.agent = agent      # an outside program (e.g. an AI agent) moves it
         self.hand = {r: 0 for r in RESOURCES}
         self.devs: list[str] = []       # unplayed cards, including VP cards
         self.new_devs: list[str] = []   # bought this turn (not yet playable)
@@ -70,13 +73,14 @@ class Player:
         return all(self.hand.get(r, 0) >= n for r, n in cards.items())
 
     def to_dict(self) -> dict:
-        return dict(name=self.name, color=self.color, bot=self.bot, hand=self.hand,
+        return dict(name=self.name, color=self.color, bot=self.bot, agent=self.agent,
+                    hand=self.hand,
                     devs=self.devs, new_devs=self.new_devs, knights=self.knights,
                     pieces=self.pieces)
 
     @classmethod
     def from_dict(cls, d: dict) -> "Player":
-        p = cls(d["name"], d["color"], d["bot"])
+        p = cls(d["name"], d["color"], d["bot"], d.get("agent", False))
         p.hand = {r: d["hand"].get(r, 0) for r in RESOURCES}
         p.devs = list(d["devs"])
         p.new_devs = list(d["new_devs"])
@@ -86,16 +90,18 @@ class Player:
 
 
 class Game:
-    def __init__(self, names, bots=None, seed=None, layout="random", first=None):
+    def __init__(self, names, bots=None, seed=None, layout="random", first=None, agents=None):
         n = len(names)
-        if n not in (3, 4):
-            raise ValueError("the base game is for 3 or 4 players")
+        if n not in (2, 3, 4):
+            raise ValueError("the game is for 2 to 4 players")
         bots = list(bots) if bots is not None else [False] * n
+        agents = list(agents) if agents is not None else [False] * n
         self.seed = seed if seed is not None else random.randrange(10**9)
         self.rng = random.Random(self.seed)
         self.layout = layout
         self.board = Board.generate(layout, self.rng)
-        self.players = [Player(nm, PLAYER_COLORS[i], bots[i]) for i, nm in enumerate(names)]
+        self.players = [Player(nm, PLAYER_COLORS[i], bots[i], agents[i])
+                        for i, nm in enumerate(names)]
         self.bank = {r: BANK_PER_RESOURCE for r in RESOURCES}
         self.dev_deck = [c for c, k in DEV_COUNTS.items() for _ in range(k)]
         self.rng.shuffle(self.dev_deck)
@@ -872,8 +878,17 @@ class Game:
         return g
 
     def save(self, path: str):
-        with open(path, "w") as f:
-            json.dump(self.to_dict(), f, separators=(",", ":"))
+        """Write atomically, so a reader in another process never sees half a file."""
+        folder = os.path.dirname(os.path.abspath(path))
+        fd, tmp = tempfile.mkstemp(dir=folder, prefix=".catan-", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(self.to_dict(), f, separators=(",", ":"))
+            os.replace(tmp, path)
+        except BaseException:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+            raise
 
     @classmethod
     def load(cls, path: str) -> "Game":

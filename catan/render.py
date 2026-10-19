@@ -181,7 +181,7 @@ def dev_summary(g: Game, p: int) -> str:
 def render_status(g: Game, viewer: int | None, color: bool = True) -> str:
     lines = []
     if g.phase == "setup":
-        head = f"Setup round {1 + g.setup_index // g.n} · {player_tag(g, g.current, color)} places a {g.setup_expect}"
+        head = f"Setup round {1 + g.setup_index // g.n} · {player_tag(g, g.current, color)} to place a {g.setup_expect}"
     elif g.phase == "game_over":
         head = f"Game over after {g.turn} turns · winner: {player_tag(g, g.winner, color)}"
     else:
@@ -197,7 +197,7 @@ def render_status(g: Game, viewer: int | None, color: bool = True) -> str:
     lines.append(f"  {'Player':<16}{'VP':>3} {'Cards':>5} {'Dev':>4} {'Knights':>8} {'Road':>5}"
                  f"  {'Left R/S/C':<11} Harbours")
     for p, pl in enumerate(g.players):
-        tag = " (bot)" if pl.bot else (" (you)" if p == viewer else "")
+        tag = " (bot)" if pl.bot else (" (you)" if p == viewer else (" (agent)" if pl.agent else ""))
         mark = ">" if p == g.current and g.phase != "game_over" else " "
         name = pl.name + tag
         vp = g.total_vp(p) if (viewer is None or p == viewer or g.phase == "game_over") else g.public_vp(p)

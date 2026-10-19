@@ -10,14 +10,17 @@ Both share the same command language; see HELP.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import sys
+import time
 
 from . import bots
 from .board import (DESERT, EDGES, HEX_VERTICES, NUM_VERTICES, PIPS, RESOURCES, VERTEX_EDGES,
                     VERTEX_HEXES, edge_between, hex_label, parse_hex)
 from .game import COSTS, DEV_NAMES, Game, IllegalAction, edge_name, fmt_cards
+from .store import GameStore
 from .render import (PLAYER_FG, legend, paint, render_board, render_hex_info, render_ports,
                      render_status, render_vertex_info, short_hand)
 
@@ -267,6 +270,10 @@ class Session:
         return render_status(self.g, viewer, self.color)
 
     def prompt(self, a: int) -> str:
+        return f"{self.status_line(a)} {self.phase_label(a)}> "
+
+    def status_line(self, a: int) -> str:
+        """Name, VP, hand and dev cards (lowercase = bought this turn)."""
         g = self.g
         pl = g.players[a]
         cards = short_hand(pl.hand)
@@ -279,8 +286,7 @@ class Session:
                 ch = ch.lower()
             letters.append(ch)
         devs = "".join(sorted(letters))
-        return (f"{self.tag(a)} {g.total_vp(a)}VP [{cards}]" + (f" dev:{devs}" if devs else "")
-                + f" {self.phase_label(a)}> ")
+        return f"{self.tag(a)} {g.total_vp(a)}VP [{cards}]" + (f" dev:{devs}" if devs else "")
 
     def phase_label(self, a: int) -> str:
         g = self.g
@@ -578,7 +584,7 @@ class Session:
             raise IllegalAction(f"unknown command '{raw[0]}' (h = help)")
         return []
 
-    def run_commands(self, a: int, commands) -> int:
+    def run_commands(self, a: int, commands, echo_log: bool = True) -> int:
         """Run a ';'-chain of commands for `a`, letting bots respond in between.
         Stops at the first error, or once the game has moved past `a`'s
         moment (turn ended, or other players placed pieces). Returns 0/1."""
@@ -592,7 +598,7 @@ class Session:
                 self.write(paint(f"! {e}", "1;31", self.color))
                 return 1
             self.advance()
-            for line in self.new_log(self.viewer(a)) + messages:
+            for line in (self.new_log(self.viewer(a)) if echo_log else []) + messages:
                 self.write(line)
             moved_on = (self.actor() != a or g.turn != turn or g.setup_index - setup_index > 1)
             if moved_on and i + 1 < len(commands):
@@ -680,13 +686,15 @@ def cards_arg(cards: dict) -> str:
 def new_game_from_args(args) -> Game:
     n = args.players
     humans = max(0, min(n, args.humans))
+    agents = max(0, min(n - humans, getattr(args, "agents", 0) or 0))
     names = [x.strip() for x in args.names.split(",")] if args.names else []
     names = (names + [nm for nm in DEFAULT_NAMES if nm not in names])[:n]
     first = None
     if args.first:
         first = int(args.first) - 1
-    return Game(names, bots=[i >= humans for i in range(n)], seed=args.seed,
-                layout=args.layout, first=first)
+    return Game(names, bots=[i >= humans + agents for i in range(n)],
+                agents=[humans <= i < humans + agents for i in range(n)],
+                seed=args.seed, layout=args.layout, first=first)
 
 
 def use_color(args) -> bool:
@@ -700,6 +708,10 @@ def use_color(args) -> bool:
 def repl(session: Session):
     g = session.g
     w = session.write
+    if any(pl.agent for pl in g.players):
+        w("This game has agent seats, which play through the save file. "
+          "Play your seat in the browser with `catan serve` (or with `catan do --as <you>`).")
+        return
     w(paint("Settlers of Catan", "1", session.color) + " - type h for help, ? for hints, q to quit.")
     if session.path:
         w(f"(autosaving to {session.path})")
@@ -753,10 +765,14 @@ def repl(session: Session):
         session.save()
 
 
-def oneshot_report(session: Session, a: int | None, show_board: bool, quiet: bool = False):
+def oneshot_report(session: Session, a: int | None, show_board: bool, quiet: bool = False,
+                   viewer: int | None = None, seat_view: bool = False):
+    """Print what happened since this viewer last looked, then what's next.
+    With seat_view, everything is shown strictly from `viewer`'s seat."""
     g = session.g
     w = session.write
-    viewer = session.viewer(a)
+    if not seat_view:
+        viewer = session.viewer(a)
     for line in session.new_log(viewer):
         w(line)
     due = session.board_due(a)
@@ -767,9 +783,11 @@ def oneshot_report(session: Session, a: int | None, show_board: bool, quiet: boo
         w(session.status_text(None))
         return
     if a is None:
+        if viewer is not None:
+            w(session.status_line(viewer))
         w("Waiting for: " + ", ".join(g.name(p) for p in g.pending()))
         return
-    w(session.prompt(a).rstrip("> ").rstrip())
+    w(session.status_line(a) + " " + session.phase_label(a))
     w("Next: " + session.next_hint(a))
 
 
@@ -783,7 +801,7 @@ def cmd_play(args):
     elif path and os.path.exists(path) and sys.stdin.isatty():
         try:
             old = Game.load(path)
-            if old.phase != "game_over":
+            if old.phase != "game_over" and not any(pl.agent for pl in old.players):
                 ans = input(f"Resume the saved game in {path} (turn {old.turn})? [Y/n] ")
                 if ans.strip().lower() in ("", "y", "yes"):
                     game = old
@@ -796,68 +814,135 @@ def cmd_play(args):
 
 
 def cmd_new(args):
-    path = args.file
-    if os.path.exists(path) and not args.force:
-        try:
-            old = Game.load(path)
-            if old.phase != "game_over":
-                print(f"{path} holds an unfinished game (turn {old.turn}); use --force to replace it.")
-                return 1
-        except Exception:
-            pass
-    game = new_game_from_args(args)
-    session = Session(game, path, use_color(args), args.ascii)
-    session.advance()
-    a = session.actor()
-    oneshot_report(session, a, show_board=True)
-    session.save()
+    store = GameStore(args.file)
+    with store.lock():
+        if store.exists() and not args.force:
+            try:
+                old = store.load()
+                if old.phase != "game_over":
+                    print(f"{args.file} holds an unfinished game (turn {old.turn}); "
+                          "use --force to replace it.")
+                    return 1
+            except Exception:
+                pass
+        game = new_game_from_args(args)
+        session = Session(game, None, use_color(args), args.ascii)
+        session.advance()
+        seat = parse_player(game, args.as_player) if getattr(args, "as_player", None) else None
+        _report_for(session, seat, show_board=not args.no_board, quiet=args.no_board)
+        store.save(game)
     return 0
 
 
-def _load_session(args) -> Session:
-    if not os.path.exists(args.file):
+def _open_store(args) -> GameStore:
+    store = GameStore(args.file)
+    if not store.exists():
         raise SystemExit(f"no game in {args.file}; start one with: catan new")
-    return Session(Game.load(args.file), args.file, use_color(args), args.ascii)
+    return store
+
+
+def _require_seat(g: Game, args):
+    """Games with agent seats are shared by several players, so every view must
+    name its seat; otherwise one player could see another's hand."""
+    if not args.as_player and any(pl.agent for pl in g.players):
+        raise IllegalAction("this game has agent seats: say whose view you want with --as <seat> "
+                            "(" + ", ".join(pl.color for pl in g.players) + ")")
+
+
+def _report_for(s: Session, seat: int | None, show_board: bool, quiet: bool):
+    """Report from one seat's point of view, or (no seat) the first human's."""
+    if seat is None:
+        oneshot_report(s, s.actor(), show_board, quiet)
+        return
+    a = seat if seat in s.g.pending() else None
+    oneshot_report(s, a, show_board, quiet, viewer=seat, seat_view=True)
 
 
 def cmd_show(args):
-    s = _load_session(args)
-    s.advance()
-    as_player = parse_player(s.g, args.as_player) if args.as_player else None
-    a = s.actor(as_player) if as_player is not None else s.actor()
-    viewer = s.viewer(a)
-    if args.log:
-        for e in s.g.log[-args.log:]:
-            s.write(s.format_log(e, viewer))
-    oneshot_report(s, a, show_board=not args.no_board)
-    s.save()
+    store = _open_store(args)
+    with store.lock():
+        s = Session(store.load(), None, use_color(args), args.ascii)
+        _require_seat(s.g, args)
+        s.advance()
+        seat = parse_player(s.g, args.as_player) if args.as_player else None
+        if args.json:
+            from .api import view_state
+            print(json.dumps(view_state(s.g, seat)))
+            store.save(s.g)
+            return 0
+        if args.log:
+            viewer = seat if seat is not None else s.viewer(s.actor())
+            for e in s.g.log[-args.log:]:
+                s.write(s.format_log(e, viewer))
+        _report_for(s, seat, show_board=not args.no_board, quiet=False)
+        store.save(s.g)
     return 0
 
 
 def cmd_do(args):
-    s = _load_session(args)
-    g = s.g
-    s.advance()
-    as_player = parse_player(g, args.as_player) if args.as_player else None
+    store = _open_store(args)
     commands = [c for chunk in args.commands for c in chunk.split(";") if c.strip()]
-    try:
-        a = s.actor(as_player)
-    except IllegalAction as e:
-        s.write(f"! {e}")
-        a, status = None, 1
-    else:
-        if a is None:
-            s.write("! no human move is pending" + (" (game over)" if g.phase == "game_over" else ""))
-            status = 1
+    with store.lock():
+        s = Session(store.load(), None, use_color(args), args.ascii)
+        g = s.g
+        _require_seat(g, args)
+        s.advance()
+        seat = parse_player(g, args.as_player) if args.as_player else None
+        status = 1
+        try:
+            a = s.actor(seat)
+        except IllegalAction as e:
+            s.write(f"! {e}")
         else:
-            status = s.run_commands(a, commands)
-    try:
-        a = s.actor(as_player) if as_player is not None else s.actor()
-    except IllegalAction:
-        a = s.actor()
-    oneshot_report(s, a, show_board=args.board, quiet=args.no_board)
-    s.save()
+            if a is None:
+                s.write("! no human move is pending" + (" (game over)" if g.phase == "game_over" else ""))
+            else:
+                if seat is None and len(s.humans()) > 1:
+                    seat = a  # several seats share this file: report only from the one that moved
+                status = s.run_commands(a, commands)
+        _report_for(s, seat, show_board=args.board, quiet=args.no_board)
+        store.save(g)
     return status
+
+
+def cmd_wait(args):
+    """Block until the given seat has a move to make (or the game ends)."""
+    store = _open_store(args)
+    deadline = time.monotonic() + args.timeout
+    seen_version = None
+    seat = None
+    while True:
+        version = store.version()
+        if version != seen_version:
+            seen_version = version
+            g = store.load()
+            if seat is None:
+                seat = parse_player(g, args.as_player)
+            if g.phase == "game_over" or seat in g.pending():
+                with store.lock():
+                    s = Session(store.load(), None, use_color(args), args.ascii)
+                    s.advance()
+                    g = s.g
+                    if g.phase == "game_over" or seat in g.pending():
+                        _report_for(s, seat, show_board=args.board, quiet=args.no_board)
+                        store.save(g)
+                        return 3 if g.phase == "game_over" else 0
+        if time.monotonic() >= deadline:
+            g = store.load()
+            print(f"Still waiting for: {', '.join(g.name(p) for p in g.pending())} "
+                  f"(gave up after {args.timeout:g}s; run wait again)")
+            return 2
+        time.sleep(args.poll)
+
+
+def cmd_serve(args):
+    from .server import serve
+    store = GameStore(args.file)
+    if not store.exists():
+        raise SystemExit(f"no game in {args.file}; start one first, e.g.\n"
+                         "  catan new --players 2 --humans 1 --agents 1 --names You,Claude")
+    return serve(store, host=args.host, port=args.port, seat=args.as_player,
+                 open_browser=not args.no_open)
 
 
 def cmd_sim(args):
@@ -891,9 +976,12 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument("--ascii", action="store_true", help="ASCII-only symbols")
 
     newopts = argparse.ArgumentParser(add_help=False)
-    newopts.add_argument("--players", type=int, default=4, choices=(3, 4))
+    newopts.add_argument("--players", type=int, default=4, choices=(2, 3, 4))
     newopts.add_argument("--humans", type=int, default=1,
-                         help="number of human (hot-seat) players; the rest are bots")
+                         help="number of human (hot-seat) players; they take the first seats")
+    newopts.add_argument("--agents", type=int, default=0,
+                         help="seats after the humans played by outside agents via "
+                              "`catan wait/do --as`; remaining seats are bots")
     newopts.add_argument("--names", help="comma-separated player names (humans first)")
     newopts.add_argument("--seed", type=int, help="random seed (reproducible games)")
     newopts.add_argument("--layout", choices=("random", "beginner"), default="random")
@@ -916,11 +1004,14 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("new", parents=[common, newopts], help="start a game in a file (one-shot mode)")
     p.add_argument("--file", "-f", default=DEFAULT_SAVE)
     p.add_argument("--force", action="store_true", help="replace an unfinished game")
+    p.add_argument("--as", dest="as_player", help="print the opening view for this seat")
+    p.add_argument("--no-board", action="store_true", help="don't print the board")
     p.set_defaults(func=cmd_new)
 
     p = sub.add_parser("show", parents=[common, fileopt], help="print board, status and what's next")
     p.add_argument("--log", type=int, default=0, help="also print the last N log lines")
     p.add_argument("--no-board", action="store_true")
+    p.add_argument("--json", action="store_true", help="machine-readable state for this seat")
     p.set_defaults(func=cmd_show)
 
     p = sub.add_parser("do", parents=[common, fileopt], help="run command(s) on the saved game")
@@ -929,9 +1020,24 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-board", action="store_true", help="never print the board")
     p.set_defaults(func=cmd_do)
 
+    p = sub.add_parser("wait", parents=[common, fileopt],
+                       help="block until a seat has a move to make (for agents)")
+    p.add_argument("--timeout", type=float, default=540,
+                   help="give up after this many seconds (exit 2); default 540")
+    p.add_argument("--poll", type=float, default=0.5, help=argparse.SUPPRESS)
+    p.add_argument("--board", action="store_true", help="always print the board")
+    p.add_argument("--no-board", action="store_true", help="never print the board")
+    p.set_defaults(func=cmd_wait)
+
+    p = sub.add_parser("serve", parents=[fileopt], help="play in your browser (local web UI)")
+    p.add_argument("--port", type=int, default=8765)
+    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--no-open", action="store_true", help="don't open a browser tab")
+    p.set_defaults(func=cmd_serve)
+
     p = sub.add_parser("sim", parents=[common], help="bot-only games (testing / watching)")
     p.add_argument("-n", "--games", type=int, default=1)
-    p.add_argument("--players", type=int, default=4, choices=(3, 4))
+    p.add_argument("--players", type=int, default=4, choices=(2, 3, 4))
     p.add_argument("--seed", type=int)
     p.add_argument("--layout", choices=("random", "beginner"), default="random")
     p.add_argument("-v", "--verbose", action="store_true", help="print each game's log and board")
@@ -944,6 +1050,9 @@ def main(argv=None) -> int:
     if not argv or argv[0].startswith("-") and argv[0] not in ("-h", "--help"):
         argv.insert(0, "play")
     args = build_parser().parse_args(argv)
+    if args.cmd == "wait" and not args.as_player:
+        print("! wait needs --as <seat>, e.g. catan wait --as blue")
+        return 1
     try:
         return args.func(args) or 0
     except IllegalAction as e:

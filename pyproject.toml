@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "catan-cli"
+version = "1.0.0"
+description = "Classic 3-4 player Settlers of Catan with bots and an efficient command-line interface"
+requires-python = ">=3.10"
+readme = "README.md"
+
+[project.scripts]
+catan = "catan.cli:main"
+
+[tool.setuptools]
+packages = ["catan"]

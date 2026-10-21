@@ -6,6 +6,8 @@ hands and development cards appear as counts.
 
 from __future__ import annotations
 
+import re
+
 from .board import (EDGES, HEX_CENTERS, NUM_HEXES, PIPS, PORT_EDGES, PORT_SLOTS, RESOURCES,
                     VERTEX_POS, hex_label)
 from .game import COSTS, DEV_NAMES, Game
@@ -19,6 +21,27 @@ GEOMETRY = {
                   for (h, side), (a, b) in zip(PORT_SLOTS, PORT_EDGES)],
     "pips": PIPS,
 }
+
+
+_ROLL = re.compile(r"^(.+) rolled (\d+) \((\d)\+(\d)\)\.$")
+_TURN = re.compile(r"^== Turn (\d+): ")
+
+
+def roll_history(g: Game) -> list[dict]:
+    """Every dice roll so far, oldest first (rolls are public)."""
+    names = {pl.name: p for p, pl in enumerate(g.players)}
+    out, turn = [], 0
+    for e in g.log:
+        text = e["t"].strip()
+        m = _TURN.match(text)
+        if m:
+            turn = int(m.group(1))
+            continue
+        m = _ROLL.match(text)
+        if m and m.group(1) in names:
+            out.append({"turn": turn, "player": names[m.group(1)], "total": int(m.group(2)),
+                        "dice": [int(m.group(3)), int(m.group(4))]})
+    return out
 
 
 def seat_kind(g: Game, p: int) -> str:
@@ -153,6 +176,7 @@ def view_state(g: Game, seat: int | None, log_tail: int = 80) -> dict:
         "legal": legal,
         "hint": hint,
         "log": [g.log_text(e, seat) for e in g.log[-log_tail:]],
+        "rolls": roll_history(g),
         "costs": COSTS,
         "seed": g.seed,
     }

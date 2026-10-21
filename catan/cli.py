@@ -881,6 +881,7 @@ def cmd_show(args):
             viewer = seat if seat is not None else s.viewer(s.actor())
             for e in s.g.log[-args.log:]:
                 s.write(s.format_log(e, viewer))
+            s.new_log(viewer)  # already printed: don't repeat it below
         _report_for(s, seat, show_board=not args.no_board, quiet=False)
         store.save(s.g)
     return 0

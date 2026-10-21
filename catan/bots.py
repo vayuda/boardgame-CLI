@@ -16,6 +16,9 @@ MAX_ACTIONS_PER_TURN = 60
 
 
 # ---------------------------------------------------------------- evaluation
+VARIETY = True   # value resource variety, not just raw dice odds
+
+
 def vertex_value(g: Game, p: int, v: int) -> float:
     prod = g.production(p)
     val = 0.0
@@ -26,11 +29,15 @@ def vertex_value(g: Game, p: int, v: int) -> float:
         if res == DESERT:
             continue
         pips = PIPS[g.board.numbers[h]] * (0.6 if h == g.robber else 1.0)
-        val += pips * RES_WEIGHT[res]
+        weight = RES_WEIGHT[res]
+        if VARIETY:
+            # Diminishing returns: more of a resource you already get is worth less.
+            weight /= 1 + (prod[res] + local[res]) / 8
+        val += pips * weight
         local[res] += pips
         if prod[res] == 0:
             new_res.add(res)
-    val += 1.2 * len(new_res)
+    val += (2.0 if VARIETY else 1.2) * len(new_res)
     port = g.board.vertex_port.get(v)
     if port == "any":
         val += 1.0

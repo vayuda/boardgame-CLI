@@ -10,6 +10,7 @@ or in your browser, against:
 It needs only Python 3.10 or newer. There are no dependencies.
 
 ```
+python3 -m catan --web           # 1 human vs 3 bots, in your browser
 python3 -m catan                 # 1 human vs 3 bots, in the terminal
 pip install . && catan           # same, as a `catan` command
 ```

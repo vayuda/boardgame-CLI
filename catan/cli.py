@@ -809,6 +809,13 @@ def cmd_play(args):
             pass
     if game is None:
         game = new_game_from_args(args)
+    if args.web:
+        from .server import serve
+        store = GameStore(path or DEFAULT_SAVE)
+        with store.lock():
+            Session(game, None, color=False, write=lambda *_: None).advance()
+            store.save(game)
+        return serve(store, port=args.port, open_browser=not args.no_open)
     session = Session(game, path, color, args.ascii)
     repl(session)
 
@@ -999,6 +1006,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-save", action="store_true", help="don't autosave")
     p.add_argument("--resume", action="store_true", help="resume the autosaved game")
     p.add_argument("--load", help="resume a game from this file")
+    p.add_argument("--web", action="store_true", help="play in the browser instead of the terminal")
+    p.add_argument("--port", type=int, default=8765, help="port for --web")
+    p.add_argument("--no-open", action="store_true", help="with --web: don't open a browser tab")
     p.set_defaults(func=cmd_play)
 
     p = sub.add_parser("new", parents=[common, newopts], help="start a game in a file (one-shot mode)")
